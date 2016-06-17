@@ -50,6 +50,32 @@ Provides a PHP script for interaction with the [ApiImport](https://github.com/da
     # Execute from another directory than a magento project root
     $> import -c /path/to/magento/installation products var/import/products.csv
 
+In [example-data](example-data) you can find example CSV files that were generated out of Akeneo sample data exports. To try each of them, run the following commands:
+
+    $> import attribute-sets example-data/attribute_sets.csv
+    Imported 14 attribute-sets
+    $> import attributes example-data/attributes.csv
+    Imported 55 attributes
+    $> import attribute-associations example-data/attribute_associations.csv
+    Imported 300 attribute-associations
+    $> import categories example-data/categories.csv
+    Begin import of "catalog_category" with "replace" behavior
+    Checked rows: 0, checked entities: 140, invalid rows: 0, total errors: 0
+    Import has been done successfuly.
+    $> import -i all products example-data/products.csv
+    Begin import of "catalog_product" with "replace" behavior
+    Checked rows: 0, checked entities: 126, invalid rows: 0, total errors: 0
+    Import has been done successfuly.
+    Product Attributes index was rebuilt successfully in 00:00:00
+    Product Prices index was rebuilt successfully in 00:00:00
+    Catalog URL Rewrites index was rebuilt successfully in 00:00:02
+    Product Flat Data index was rebuilt successfully in 00:00:01
+    Category Flat Data index was rebuilt successfully in 00:00:00
+    Category Products index was rebuilt successfully in 00:00:00
+    Catalog Search Index index was rebuilt successfully in 00:00:00
+    Stock Status index was rebuilt successfully in 00:00:00
+    Tag Aggregation Data index was rebuilt successfully in 00:00:00
+    
 ## Installation
 
     curl -sL "https://raw.githubusercontent.com/netresearch/mage-api-import-cli/master/import" -o /usr/local/bin/import
