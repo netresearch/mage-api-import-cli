@@ -38,7 +38,7 @@ Provides a PHP script for interaction with the [ApiImport](https://github.com/da
                     catalogsearch_fulltext
                     cataloginventory_stock
                     tag_summary
-    -c PATH       Execute the import within the given PATH (root path of a
+    -c PATH       Change dir to PATH prior to the import (root path of a
                   magento installation)
 
 ## Examples
