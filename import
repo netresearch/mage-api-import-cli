@@ -1,0 +1,218 @@
+<?php
+/**
+ * Magento API import CLI script
+ * 
+ * Provides a PHP script for interaction with the ApiImport module for Magento.
+ *
+ * PHP Version 5
+ *
+ * @category Magento
+ * @package  CLI
+ * @author   Christian Opitz <christian.opitz@netresearch.de>
+ * @license  https://github.com/netresearch/mage-api-import-cli/blob/master/LICENSE GNU GENERAL PUBLIC LICENSE v3
+ * @link     https://github.com/netresearch/mage-api-import-cli
+ */
+
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+set_error_handler(function ($errno, $errstr, $errfile, $errline ) {
+    throw new ErrorException($errstr, 0, $errno, $errfile, $errline);
+    return false;
+}, E_ALL ^ E_STRICT ^ E_NOTICE ^ E_USER_NOTICE);
+set_exception_handler(function($exception) {
+    echo $exception . "\n";
+    exit(1);
+});
+
+$self = array_shift($argv);
+
+$types = [
+    'categories' => [
+        'importEntities',
+        'catalog_category'
+    ],
+    'products' => [
+        'importEntities',
+        'catalog_product'
+    ],
+    'customers' => [
+        'importEntities',
+        'catalog_customer'
+    ],
+    'attribute-sets' => [
+        'importAttributeSets'
+    ],
+    'attributes' => [
+        'importAttributes'
+    ],
+    'attribute-associations' => [
+        'importAttributeAssociations'
+    ]
+];
+
+#----------------------------------------------#
+# Arguments and options parsing and validation #
+#----------------------------------------------#
+$behaviour = 'replace';
+$delimiter = ";";
+$enclosure = '"';
+$escapeChar = '"';
+$error = false;
+$help = false;
+$indexes = false;
+
+while ($argv) {
+    $next = array_shift($argv);
+    if ($next === '-h' || $next === '--help') {
+        $help = true;
+    } elseif ($next[0] === '-') {
+        if ($next === '-b') {
+            $behaviour = array_shift($argv);
+        } elseif ($next === '-d') {
+            $delimiter = array_shift($argv);
+        } elseif ($next === '-e') {
+            $enclosure = array_shift($argv);
+        } elseif ($next === '-s') {
+            $escapeChar = array_shift($argv);
+        } elseif ($next === '-i') {
+            $indexes = array_shift($argv);
+        } elseif ($next === '-c') {
+            if (!@chdir($dir = array_shift($argv))) {
+                $error = "Could not change to $dir";
+            }
+        } else {
+            $error = "Invalid option $next";
+            break;
+        }
+    } else {
+        array_unshift($argv, $next);
+        break;
+    }
+}
+$file = array_pop($argv);
+$type = array_pop($argv);
+
+$indexerPath = stream_resolve_include_path('shell/indexer.php');
+if (!$indexerPath) {
+    $error = 'You don\'t appear to be in a magento installation -';
+    $error .= "\neither change to one or provide it with the -c option.";
+}
+
+if ($error || $help) {
+} elseif (!$file || !$type) {
+    $error = 'To few arguments';
+} elseif (count($argv)) {
+    $error = 'To many arguments';
+} elseif (!file_exists($file) || !is_readable($file)) {
+    $error = "File $file does not exists or isn't readable";
+} elseif (!array_key_exists($type, $types)) {
+    $error = "Invalid type $type";
+} elseif (!in_array($behaviour, ['replace', 'append', 'delete'], true) && !(substr($type, 0, 9) === 'attribute' && $behaviour === 'delete_if_not_exist')) {
+    $error = "Invalid behaviour $behaviour";
+}
+
+if ($error) {
+    echo $error . "\n";
+    echo "Run $self --help " . ($indexerPath ? '' : '-c MAGENTO_PATH ') . " for help\n";
+    exit(1);
+}
+
+#---------------------------------------------#
+# Help                                        #
+#---------------------------------------------#
+if ($help) {
+    $_SERVER['argv'] = ['info'];
+    ob_start();
+    require_once $indexerPath;
+    $indexesString = ob_get_clean();
+    echo implode("\n", [
+        "import [OPTIONS] TYPE CSV_FILE\n",
+        "Invokes the import of ApiImport according to TYPE for the CSV_FILE\n",
+        "Arguments:",
+        "TYPE      Type of the import entities - possible types are: ",
+        "            " . implode("\n            ", array_keys($types)),
+        "CSV_FILE  Path to the CSV file containing the entities\n",
+        "Options:",
+        "-b BEHAVIOUR  Behaviour  - can be 'append', 'replace' or 'delete' and ",
+        "              (only for the attribute*-types) 'delete_if_not_exist'",
+        "              Defaults to 'replace'",
+        "-d DELIMITER  The csv delimiter (defaults to ;)",
+        "-e ENCLOSURE  Text enclosure (defaults to \"",
+        "-s ESCAPE     Escape char (defaults to \\)",
+        "-i INDEXES    Rebuild the given (comma separated) or all indexes - ",
+        "              valid indexes are:",
+        "                all",
+        preg_replace('/^([^\s]+).+$/m', '                $1', trim($indexesString)),
+        "-c PATH       Change dir to PATH prior to the import (root path of a",
+        "              magento installation)"
+    ]);
+    echo "\n\n";
+    exit;
+}
+
+#---------------------------------------------#
+# Do the import                               #
+#---------------------------------------------#
+
+require_once 'app/Mage.php';
+
+Mage::init('admin');
+
+class Logger extends Mage_Core_Model_Log_Adapter {
+    public static $outputHappened = false;
+    public function log($message) {
+        self::$outputHappened = true;
+        if (is_array($message)) {
+            foreach ($message as $line) {
+                if (is_string($line)) {
+                    echo $line . "\n";
+                } else {
+                    echo rtrim(print_r($line, true)) . "\n";
+                }
+            }
+            return;
+        }
+        echo rtrim($message) . "\n";
+    }
+}
+class Api extends Danslo_ApiImport_Model_Import_Api {
+    public function __construct() {
+        parent::__construct();
+        $refObject = new ReflectionObject($this->_api);
+        $refProperty = $refObject->getProperty('_logInstance');
+        $refProperty->setAccessible(true);
+        $refProperty->setValue($this->_api, new Logger());
+    }
+}
+$api = new Api();
+
+$handle = fopen($file, 'r');
+$entities = array();
+$header = fgetcsv($handle, 0, $delimiter, $enclosure, $escapeChar);
+$count = 0;
+while ($row = fgetcsv($handle, 0, $delimiter, $enclosure, $escapeChar)) {
+    $entities[] = array_filter(array_combine($header, $row), function ($cell) { return $cell !== null && $cell !== ""; });
+    $count++;
+}
+
+$arguments = $types[$type];
+$method = array_shift($arguments);
+array_unshift($arguments, $entities);
+array_push($arguments, $behaviour);
+
+try {
+    call_user_func_array([$api, $method], $arguments);
+    if (!Logger::$outputHappened) {
+        echo "Imported $count $type\n";
+    }
+} catch (Mage_Api_Exception $e) {
+    echo $e->getMessage() . ":\n";
+    echo $e->getCustomMessage() . "\n";
+    exit(1);
+}
+
+if ($indexes) {
+    $_SERVER['argv'] = ($indexes === 'all') ? ['reindexall'] : ['--reindex', $indexes];
+    require_once $indexerPath;
+}
