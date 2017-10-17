@@ -28,30 +28,6 @@ set_exception_handler(function($exception) {
 
 $self = array_shift($argv);
 
-$types = [
-    'categories' => [
-        'importEntities',
-        'catalog_category'
-    ],
-    'products' => [
-        'importEntities',
-        'catalog_product'
-    ],
-    'customers' => [
-        'importEntities',
-        'catalog_customer'
-    ],
-    'attribute-sets' => [
-        'importAttributeSets'
-    ],
-    'attributes' => [
-        'importAttributes'
-    ],
-    'attribute-associations' => [
-        'importAttributeAssociations'
-    ]
-];
-
 #----------------------------------------------#
 # Arguments and options parsing and validation #
 #----------------------------------------------#
@@ -96,11 +72,99 @@ $type = array_pop($argv);
 
 $indexerPath = stream_resolve_include_path('shell/indexer.php');
 if (!$indexerPath) {
-    $error = 'You don\'t appear to be in a magento installation -';
-    $error .= "\neither change to one or provide it with the -c option.";
+    echo 'You don\'t appear to be in a magento installation -';
+    echo "\neither change to one or provide it with the -c option.";
+    exit(1);
 }
 
-if ($error || $help) {
+require_once 'app/Mage.php';
+Mage::init('admin');
+
+class Logger extends Mage_Core_Model_Log_Adapter {
+    public static $outputHappened = false;
+    public function log($data = null) {
+        self::$outputHappened = true;
+        if (is_array($data)) {
+            foreach ($data as $line) {
+                if (is_string($line)) {
+                    echo $line . "\n";
+                } else {
+                    echo rtrim(print_r($line, true)) . "\n";
+                }
+            }
+            return;
+        }
+        echo rtrim($data) . "\n";
+    }
+}
+class Api extends Danslo_ApiImport_Model_Import_Api {
+    private $types = [
+        'categories' => [
+            'importEntities',
+            'catalog_category'
+        ],
+        'products' => [
+            'importEntities',
+            'catalog_product'
+        ],
+        'customers' => [
+            'importEntities',
+            'catalog_customer'
+        ]
+    ];
+
+    public function __construct() {
+        parent::__construct();
+        $refObject = new ReflectionObject($this->_api);
+        $refProperty = $refObject->getProperty('_logInstance');
+        $refProperty->setAccessible(true);
+        $refProperty->setValue($this->_api, new Logger());
+
+        $refClass = new ReflectionClass(__CLASS__);
+        foreach ($refClass->getMethods(ReflectionMethod::IS_PUBLIC) as $method) {
+            $name = $method->getName();
+            if (substr($name, 0, 6) === 'import' && $name !== 'importEntities') {
+                // CamelCase to camel-case
+                $type = strtolower(preg_replace("/([A-Z])/", "-$1", lcfirst(substr($name, 6))));
+                $this->types[$type] = [ $name ];
+            }
+        }
+    }
+
+    public function getTypes() {
+        return $this->types;
+    }
+}
+$api = new Api();
+
+if ($help) {
+    $_SERVER['argv'] = ['info'];
+    ob_start();
+    require_once $indexerPath;
+    $indexesString = ob_get_clean();
+    echo implode("\n", [
+        "import [OPTIONS] TYPE CSV_FILE\n",
+        "Invokes the import of ApiImport according to TYPE for the CSV_FILE\n",
+        "Arguments:",
+        "TYPE      Type of the import entities - possible types are: ",
+        "            " . implode("\n            ", array_keys($api->getTypes())),
+        "CSV_FILE  Path to the CSV file containing the entities\n",
+        "Options:",
+        "-b BEHAVIOUR  Behaviour  - can be 'append', 'replace' or 'delete' and ",
+        "              (only for the attribute*-types) 'delete_if_not_exist'",
+        "              Defaults to 'replace'",
+        "-d DELIMITER  The csv delimiter (defaults to ;)",
+        "-e ENCLOSURE  Text enclosure (defaults to \"",
+        "-s ESCAPE     Escape char (defaults to \\)",
+        "-i INDEXES    Rebuild the given (comma separated) or all indexes - ",
+        "              valid indexes are:",
+        "                all",
+        preg_replace('/^([^\s]+).+$/m', '                $1', trim($indexesString)),
+        "-c PATH       Change dir to PATH prior to the import (root path of a",
+        "              magento installation)"
+    ]);
+    echo "\n\n";
+    exit;
 } elseif (!$file || !$type) {
     $error = 'To few arguments';
 } elseif (count($argv)) {
@@ -120,73 +184,8 @@ if ($error) {
 }
 
 #---------------------------------------------#
-# Help                                        #
-#---------------------------------------------#
-if ($help) {
-    $_SERVER['argv'] = ['info'];
-    ob_start();
-    require_once $indexerPath;
-    $indexesString = ob_get_clean();
-    echo implode("\n", [
-        "import [OPTIONS] TYPE CSV_FILE\n",
-        "Invokes the import of ApiImport according to TYPE for the CSV_FILE\n",
-        "Arguments:",
-        "TYPE      Type of the import entities - possible types are: ",
-        "            " . implode("\n            ", array_keys($types)),
-        "CSV_FILE  Path to the CSV file containing the entities\n",
-        "Options:",
-        "-b BEHAVIOUR  Behaviour  - can be 'append', 'replace' or 'delete' and ",
-        "              (only for the attribute*-types) 'delete_if_not_exist'",
-        "              Defaults to 'replace'",
-        "-d DELIMITER  The csv delimiter (defaults to ;)",
-        "-e ENCLOSURE  Text enclosure (defaults to \"",
-        "-s ESCAPE     Escape char (defaults to \\)",
-        "-i INDEXES    Rebuild the given (comma separated) or all indexes - ",
-        "              valid indexes are:",
-        "                all",
-        preg_replace('/^([^\s]+).+$/m', '                $1', trim($indexesString)),
-        "-c PATH       Change dir to PATH prior to the import (root path of a",
-        "              magento installation)"
-    ]);
-    echo "\n\n";
-    exit;
-}
-
-#---------------------------------------------#
 # Do the import                               #
 #---------------------------------------------#
-
-require_once 'app/Mage.php';
-
-Mage::init('admin');
-
-class Logger extends Mage_Core_Model_Log_Adapter {
-    public static $outputHappened = false;
-    public function log($message) {
-        self::$outputHappened = true;
-        if (is_array($message)) {
-            foreach ($message as $line) {
-                if (is_string($line)) {
-                    echo $line . "\n";
-                } else {
-                    echo rtrim(print_r($line, true)) . "\n";
-                }
-            }
-            return;
-        }
-        echo rtrim($message) . "\n";
-    }
-}
-class Api extends Danslo_ApiImport_Model_Import_Api {
-    public function __construct() {
-        parent::__construct();
-        $refObject = new ReflectionObject($this->_api);
-        $refProperty = $refObject->getProperty('_logInstance');
-        $refProperty->setAccessible(true);
-        $refProperty->setValue($this->_api, new Logger());
-    }
-}
-$api = new Api();
 
 $handle = fopen($file, 'r');
 $entities = array();
