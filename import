@@ -136,6 +136,7 @@ class Api extends Danslo_ApiImport_Model_Import_Api {
     }
 }
 $api = new Api();
+$types = $api->getTypes();
 
 if ($help) {
     $_SERVER['argv'] = ['info'];
@@ -147,7 +148,7 @@ if ($help) {
         "Invokes the import of ApiImport according to TYPE for the CSV_FILE\n",
         "Arguments:",
         "TYPE      Type of the import entities - possible types are: ",
-        "            " . implode("\n            ", array_keys($api->getTypes())),
+        "            " . implode("\n            ", array_keys($types)),
         "CSV_FILE  Path to the CSV file containing the entities\n",
         "Options:",
         "-b BEHAVIOUR  Behaviour  - can be 'append', 'replace' or 'delete' and ",
